@@ -78,7 +78,11 @@ def sobrat_operacii_ispolnitelya(tablicy, papka_goda=".", god=""):
             print("Сохранение отменено")
             return None, False
 
-        staraya_tablica = pd.read_excel(imya_rezultata)
+        try:
+            staraya_tablica = pd.read_excel(imya_rezultata)
+        except Exception as oshibka:
+            print("Ошибка чтения файла:", oshibka)
+            return None, False
     else:
         print("\nФайл", imya_rezultata, "пока не существует")
         print("1 - создать новую таблицу")
@@ -95,7 +99,11 @@ def sobrat_operacii_ispolnitelya(tablicy, papka_goda=".", god=""):
             imya_starogo = input("Введите название старого файла (-1 — назад): ")
             if imya_starogo.strip() == "-1":
                 return None, False
-            staraya_tablica = pd.read_excel(imya_starogo)
+            try:
+                staraya_tablica = pd.read_excel(imya_starogo)
+            except Exception as oshibka:
+                print("Ошибка чтения файла:", oshibka)
+                return None, False
 
     novyi_df = pd.concat(
         [staraya_tablica, operacii], ignore_index=True

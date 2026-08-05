@@ -6,6 +6,87 @@ import numpy as np
 from tablica import Tablica
 
 
+EDINYE_KOLONKI = [
+    "Документ",
+    "Дата операции",
+    "Корреспондент",
+    "ИНН",
+    "КПП",
+    "Счет",
+    "БИК",
+    "Наименование банка",
+    "Вх.остаток",
+    "Оборот Дт",
+    "Оборот Кт",
+    "Назначение платежа",
+]
+
+
+def normalizovat_nazvanie(znachenie):
+    if pd.isna(znachenie):
+        return ""
+    return str(znachenie).strip().lower().replace("ё", "е")
+
+
+def prochitat_vypisku(fil, list_excel=0):
+    syrye_dannye = pd.read_excel(fil, sheet_name=list_excel, header=None)
+
+    stroka_zagolovka = None
+    varianty_documenta = {"документ", "номер документа"}
+    varianty_daty = {"дата", "дата операции"}
+
+    # Ищем строку заголовка по двум обязательным названиям, а не по номеру строки.
+    for index, stroka in syrye_dannye.head(50).iterrows():
+        znacheniya = {normalizovat_nazvanie(znachenie) for znachenie in stroka}
+        est_document = bool(znacheniya & varianty_documenta)
+        est_data = bool(znacheniya & varianty_daty)
+
+        if est_document and est_data:
+            stroka_zagolovka = index
+            break
+
+    if stroka_zagolovka is None:
+        raise ValueError(
+            "Не найдена строка заголовка с колонками "
+            "'Документ/Номер документа' и 'Дата/Дата операции'"
+        )
+
+    # Заголовок занимает две строки. В первой лежат основные названия,
+    # во второй — Наименование, ИНН, КПП, Счет и БИК.
+    verhnie_nazvaniya = syrye_dannye.iloc[stroka_zagolovka]
+    nizhnie_nazvaniya = syrye_dannye.iloc[stroka_zagolovka + 1]
+    nazvaniya_kolonok = []
+
+    for nomer, (verhnee, nizhnee) in enumerate(
+        zip(verhnie_nazvaniya, nizhnie_nazvaniya), start=1
+    ):
+        if normalizovat_nazvanie(verhnee):
+            nazvanie = str(verhnee).strip()
+        elif normalizovat_nazvanie(nizhnee):
+            nazvanie = str(nizhnee).strip()
+        else:
+            nazvanie = f"Колонка {nomer}"
+        nazvaniya_kolonok.append(nazvanie)
+
+    df = syrye_dannye.iloc[stroka_zagolovka + 2:].copy()
+    df.columns = nazvaniya_kolonok
+    # Приводим два банковских формата к одним названиям колонок.
+    df = df.rename(columns={
+        "Номер документа": "Документ",
+        "Дата": "Дата операции",
+        "Дебет": "Оборот Дт",
+        "Кредит": "Оборот Кт",
+        "Контрагент": "Корреспондент",
+        "Счёт": "Счет",
+    })
+
+    # Для всех банков используем одинаковые колонки и одинаковый порядок.
+    # Если в банковском формате колонки нет, она останется пустой.
+    df = df.reindex(columns=EDINYE_KOLONKI)
+
+    return df
+
+
 def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
     novaya_tablica = None
 
@@ -14,18 +95,11 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
         if fil.strip() == "-1":
             return None, None, None
 
-        # Первые 9 строк пропускаем. Строка 10 становится заголовком.
-        df = pd.read_excel(fil, skiprows=9)
-
-        # Во второй строке таблицы лежат названия ИНН, КПП, Счет и БИК.
-        df = df.rename(columns={
-            "Unnamed: 3": "ИНН",
-            "Unnamed: 4": "КПП",
-            "Unnamed: 5": "Счет",
-            "Unnamed: 6": "БИК",
-        })
-        df = df.iloc[:, :11]
-        df = df.drop(0).reset_index(drop=True)
+        try:
+            df = prochitat_vypisku(fil)
+        except Exception as oshibka:
+            print("Ошибка чтения файла:", oshibka)
+            return None, None, None
 
         # Строку ИТОГО и все строки после нее не берем.
         stroka_itogo = df.index[
@@ -36,6 +110,19 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
     else:
         fil = tablica.imya
         df = tablica.df.copy()
+
+    obyazatelnye_kolonki = [
+        "Документ",
+        "Оборот Дт",
+        "Оборот Кт",
+        "Назначение платежа",
+    ]
+    net_kolonok = [
+        kolonka for kolonka in obyazatelnye_kolonki if kolonka not in df.columns
+    ]
+    if net_kolonok:
+        print("Ошибка: в таблице нет колонок:", ", ".join(net_kolonok))
+        return None, None, None
 
     df = df.dropna(how="all").reset_index(drop=True)
     df["Оборот Дт"] = pd.to_numeric(df["Оборот Дт"], errors="coerce")
