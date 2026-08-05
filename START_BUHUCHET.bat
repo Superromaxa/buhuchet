@@ -1,5 +1,5 @@
 @echo off
-chcp 65001 > nul
+color F0
 cd /d "%~dp0"
 Buhuchet.exe
 echo.

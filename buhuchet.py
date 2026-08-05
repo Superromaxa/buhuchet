@@ -9,12 +9,20 @@ from sostavlenie_premiy import sostavit_premii
 from operacii_ispolnitelya import sobrat_operacii_ispolnitelya
 from tablica import Tablica
 from technicheskie_voprosy import technicheskie_voprosy
+from itogovaya_summa import dobavit_itogovuyu_summu
 
 
 def poluchit_rabochuyu_papku():
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
+
+
+def nastroit_konsol():
+    """В Windows включает белый фон и черный текст."""
+    if os.name == "nt":
+        os.system("color F0")
+        os.system("cls")
 
 
 def vybrat_tablicu(tablicy):
@@ -98,10 +106,14 @@ def zagruzit_tablicy(papka_mesaca, papka_goda):
     tablicy = []
     for nomer in nomera:
         imya = dostupnie_fayly[nomer - 1]
-        if imya.lower().endswith(".csv"):
-            df = pd.read_csv(imya, sep=";", encoding="utf-8-sig")
-        else:
-            df = pd.read_excel(imya)
+        try:
+            if imya.lower().endswith(".csv"):
+                df = pd.read_csv(imya, sep=";", encoding="utf-8-sig")
+            else:
+                df = pd.read_excel(imya)
+        except Exception as oshibka:
+            print("Ошибка чтения файла", imya + ":", oshibka)
+            continue
         tablicy.append(Tablica(imya, df))
         print("Загружено:", imya)
 
@@ -110,6 +122,7 @@ def zagruzit_tablicy(papka_mesaca, papka_goda):
 
 rabochaya_papka = poluchit_rabochuyu_papku()
 os.chdir(rabochaya_papka)
+nastroit_konsol()
 
 god = input("Введите год работы: ").strip()
 while not god.isdigit():
@@ -133,7 +146,8 @@ while True:
     print("2 - добавить исполнителя для файла")
     print("3 - составление премий")
     print("4 - собрать операции по исполнителю")
-    print("5 - технические вопросы")
+    print("5 - добавить итоговую сумму")
+    print("6 - технические вопросы")
     print("-1 - завершить работу")
 
     punkt = input("Введите номер пункта: ")
@@ -154,11 +168,10 @@ while True:
         istochnik = vybrat_tablicu(tablicy)
         if istochnik == "назад":
             continue
-        novaya, rezultat = dobavit_ispolnitelya(
-            istochnik, papka_mesaca
+        novye, rezultat = dobavit_ispolnitelya(
+            istochnik, papka_mesaca, god, mesyac
         )
-        if novaya is not None:
-            tablicy.append(novaya)
+        tablicy.extend(novye)
         if rezultat is not None:
             tablicy.append(rezultat)
     elif punkt == "3":
@@ -172,6 +185,17 @@ while True:
         if rezultat is not None and dobavit_v_sessiyu:
             tablicy.append(rezultat)
     elif punkt == "5":
+        istochnik = vybrat_tablicu(tablicy)
+        if istochnik == "назад":
+            continue
+        novaya, rezultat = dobavit_itogovuyu_summu(
+            istochnik, papka_mesaca
+        )
+        if novaya is not None:
+            tablicy.append(novaya)
+        if rezultat is not None:
+            tablicy.append(rezultat)
+    elif punkt == "6":
         technicheskie_voprosy(tablicy, papka_mesaca, papka_goda)
     elif punkt == "-1":
         if tablicy:

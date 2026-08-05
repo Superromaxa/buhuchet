@@ -106,10 +106,14 @@ def dozagruzit_tablicy(tablicy, papka_mesaca, papka_goda):
 
     for nomer in nomera:
         imya = dostupnie[nomer - 1]
-        if imya.lower().endswith(".csv"):
-            df = pd.read_csv(imya, sep=";", encoding="utf-8-sig")
-        else:
-            df = pd.read_excel(imya)
+        try:
+            if imya.lower().endswith(".csv"):
+                df = pd.read_csv(imya, sep=";", encoding="utf-8-sig")
+            else:
+                df = pd.read_excel(imya)
+        except Exception as oshibka:
+            print("Ошибка чтения файла", imya + ":", oshibka)
+            continue
         tablicy.append(Tablica(imya, df))
         print("Загружено:", imya)
 
