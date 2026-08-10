@@ -73,6 +73,14 @@ def dobavit_itogovuyu_summu(tablica=None, papka_rezultatov="."):
     debit = pd.to_numeric(df["Оборот Дт"], errors="coerce")
     kredit = pd.to_numeric(df["Оборот Кт"], errors="coerce")
     df["Итоговая сумма"] = debit.combine_first(kredit)
+    if "Комиссия" not in df.columns:
+        df["Комиссия"] = 0.0
+    else:
+        df["Комиссия"] = pd.to_numeric(df["Комиссия"], errors="coerce").fillna(0)
+    if "НДС" not in df.columns:
+        df["НДС"] = 0.0
+    else:
+        df["НДС"] = pd.to_numeric(df["НДС"], errors="coerce").fillna(0)
 
     naznacheniya = df["Назначение платежа"].fillna("").astype(str)
     vozmeshenie = naznacheniya.str.contains(
@@ -110,6 +118,8 @@ def dobavit_itogovuyu_summu(tablica=None, papka_rezultatov="."):
             if nds is None:
                 return novaya_tablica, None
 
+        df.loc[index, "Комиссия"] = komissiya
+        df.loc[index, "НДС"] = nds
         df.loc[index, "Итоговая сумма"] = osnovnaya_summa + komissiya + nds
 
     imya_fayla = os.path.basename(fil)

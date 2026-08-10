@@ -1,15 +1,30 @@
 import os
 import sys
+import traceback
 
 import pandas as pd
 
 from obrabotka_altegra import dobavit_tip_operacii
-from dobavit_ispolnitelya import dobavit_ispolnitelya
+from dobavit_ispolnitelya import (
+    dobavit_ispolnitelya,
+    nomer_mesaca,
+    prochitat_starye_tablicy,
+    vybrat_format_tablic_ispolniteley,
+)
 from sostavlenie_premiy import sostavit_premii
 from operacii_ispolnitelya import sobrat_operacii_ispolnitelya
 from tablica import Tablica
 from technicheskie_voprosy import technicheskie_voprosy
 from itogovaya_summa import dobavit_itogovuyu_summu
+from sformirovat_itogovuyu_tablicu import (
+    oformit_itogovyi_excel,
+    sformirovat_itogovuyu_tablicu,
+)
+from tablica_vseh_operaciy import (
+    KOLONKI as KOLONKI_VSEH_OPERACIY,
+    oformit_tablicu_vseh_operaciy,
+    tablica_vseh_operaciy,
+)
 
 
 def poluchit_rabochuyu_papku():
@@ -62,6 +77,14 @@ def sohranit_tablicy(tablicy):
             if rasshirenie == ".xls":
                 tablica.imya = os.path.splitext(tablica.imya)[0] + ".xlsx"
             tablica.df.to_excel(tablica.imya, index=False)
+            if list(tablica.df.columns) == [
+                "Дата", "Фирма", "Тип", "Подтип", "Сумма"
+            ]:
+                oformit_itogovyi_excel(tablica.imya)
+            elif "Причина" in tablica.df.columns and "Строка Excel" in tablica.df.columns:
+                oformit_itogovyi_excel(tablica.imya, neuchtennye=True)
+            elif list(tablica.df.columns) == KOLONKI_VSEH_OPERACIY:
+                oformit_tablicu_vseh_operaciy(tablica.imya)
         print("Сохранено:", tablica.imya)
 
 
@@ -143,11 +166,13 @@ tablicy = zagruzit_tablicy(papka_mesaca, papka_goda)
 while True:
     print("\nВыберите пункт меню")
     print("1 - добавить тип операции для файла")
-    print("2 - добавить исполнителя для файла")
-    print("3 - составление премий")
+    print("2 - добавить итоговую сумму")
+    print("3 - добавить исполнителя для файла")
     print("4 - собрать операции по исполнителю")
-    print("5 - добавить итоговую сумму")
-    print("6 - технические вопросы")
+    print("5 - составление премий")
+    print("6 - сформировать итоговую таблицу")
+    print("7 - таблица всех операций")
+    print("8 - дополнительные возможности")
     print("-1 - завершить работу")
 
     punkt = input("Введите номер пункта: ")
@@ -163,28 +188,10 @@ while True:
             continue
         if novaya is not None:
             tablicy.append(novaya)
-        tablicy.extend([rezultat, nerasp])
+        tablicy.append(rezultat)
+        if nerasp is not None:
+            tablicy.append(nerasp)
     elif punkt == "2":
-        istochnik = vybrat_tablicu(tablicy)
-        if istochnik == "назад":
-            continue
-        novye, rezultat = dobavit_ispolnitelya(
-            istochnik, papka_mesaca, god, mesyac
-        )
-        tablicy.extend(novye)
-        if rezultat is not None:
-            tablicy.append(rezultat)
-    elif punkt == "3":
-        rezultat = sostavit_premii(tablicy, papka_mesaca)
-        if rezultat is not None:
-            tablicy.append(rezultat)
-    elif punkt == "4":
-        rezultat, dobavit_v_sessiyu = sobrat_operacii_ispolnitelya(
-            tablicy, papka_goda, god
-        )
-        if rezultat is not None and dobavit_v_sessiyu:
-            tablicy.append(rezultat)
-    elif punkt == "5":
         istochnik = vybrat_tablicu(tablicy)
         if istochnik == "назад":
             continue
@@ -195,7 +202,91 @@ while True:
             tablicy.append(novaya)
         if rezultat is not None:
             tablicy.append(rezultat)
+    elif punkt == "3":
+        format_tablic = vybrat_format_tablic_ispolniteley()
+        if format_tablic == "-1":
+            continue
+        starye_operacii = None
+        if format_tablic == "2":
+            starye_operacii = prochitat_starye_tablicy(
+                os.path.join(rabochaya_papka, "Старые таблицы")
+            )
+            if starye_operacii is None:
+                continue
+
+        istochnik = vybrat_tablicu(tablicy)
+        if istochnik == "назад":
+            continue
+        try:
+            novye, rezultat = dobavit_ispolnitelya(
+                istochnik,
+                papka_mesaca,
+                god,
+                mesyac,
+                gotovye_operacii=starye_operacii,
+            )
+        except Exception as oshibka:
+            print("Ошибка при добавлении исполнителей:", oshibka)
+            print("Программа продолжит работу. Подробности записаны в error_log.txt")
+            with open(
+                os.path.join(rabochaya_papka, "error_log.txt"),
+                "a",
+                encoding="utf-8",
+            ) as zhurnal:
+                zhurnal.write(traceback.format_exc() + "\n")
+            continue
+        tablicy.extend(novye)
+        if rezultat is not None:
+            tablicy.append(rezultat)
+    elif punkt == "4":
+        rezultat, dobavit_v_sessiyu = sobrat_operacii_ispolnitelya(
+            tablicy, papka_goda, god
+        )
+        if rezultat is not None and dobavit_v_sessiyu:
+            tablicy.append(rezultat)
+    elif punkt == "5":
+        rezultaty = sostavit_premii(tablicy, papka_mesaca, mesyac)
+        tablicy.extend(rezultaty)
     elif punkt == "6":
+        mesyac_chislom = nomer_mesaca(mesyac)
+        if mesyac_chislom is None:
+            print(
+                "Ошибка: не удалось определить месяц. "
+                "Перезапустите программу и введите название месяца правильно."
+            )
+            continue
+        try:
+            rezultaty = sformirovat_itogovuyu_tablicu(
+                tablicy,
+                papka_mesaca,
+                god,
+                mesyac,
+                mesyac_chislom,
+            )
+            tablicy.extend(rezultaty)
+        except Exception as oshibka:
+            print("Ошибка при формировании итоговой таблицы:", oshibka)
+            print("Программа вернётся в главное меню.")
+            with open(
+                os.path.join(rabochaya_papka, "error_log.txt"),
+                "a",
+                encoding="utf-8",
+            ) as zhurnal:
+                zhurnal.write(traceback.format_exc() + "\n")
+    elif punkt == "7":
+        try:
+            novye_tablicy = tablica_vseh_operaciy(tablicy, papka_mesaca)
+            tablicy.extend(novye_tablicy)
+        except Exception as oshibka:
+            print("Ошибка при работе с таблицей всех операций:", oshibka)
+            print("Программа вернётся в главное меню.")
+            with open(
+                os.path.join(rabochaya_papka, "error_log.txt"),
+                "a",
+                encoding="utf-8",
+            ) as zhurnal:
+                zhurnal.write(traceback.format_exc() + "\n")
+    elif punkt == "8":
         technicheskie_voprosy(tablicy, papka_mesaca, papka_goda)
     elif punkt == "-1":
         if tablicy:

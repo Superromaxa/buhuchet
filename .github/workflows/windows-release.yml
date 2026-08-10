@@ -48,6 +48,9 @@ jobs:
             buhuchet.py
           Copy-Item START_BUHUCHET.bat dist/Buhuchet/
           Copy-Item README_FOR_MOM.txt dist/Buhuchet/
+          Copy-Item 'КАК_ЗАПОЛНЯТЬ_ТАБЛИЦЫ.txt' dist/Buhuchet/
+          Copy-Item 'КРАТКАЯ_ПРОВЕРКА_МЕНЮ.txt' dist/Buhuchet/
+          Copy-Item 'ПРИМЕР_ЗАПОЛНЕНИЯ_ТАБЛИЦЫ.xlsx' dist/Buhuchet/
           Compress-Archive -Path dist/Buhuchet/* -DestinationPath Buhuchet-Windows7-x64.zip
 
       - name: Upload test artifact
