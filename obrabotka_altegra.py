@@ -28,6 +28,46 @@ def normalizovat_nazvanie(znachenie):
     return str(znachenie).strip().lower().replace("ё", "е")
 
 
+def eto_itogovaya_yacheyka(znachenie):
+    """Распознаёт отдельную служебную надпись ИТОГО с пунктуацией."""
+    tekst = normalizovat_nazvanie(znachenie)
+    tekst = tekst.rstrip(":;. ")
+    return tekst in {"итого", "итоги", "всего"}
+
+
+def ubrat_itog_i_stroki_posle(df):
+    """Отсекает первую строку итогов и всё, что находится ниже неё."""
+    maska_itogo = df.apply(
+        lambda kolonka: kolonka.map(eto_itogovaya_yacheyka)
+    ).any(axis=1)
+    pozicii = np.flatnonzero(maska_itogo.to_numpy())
+    if len(pozicii) == 0:
+        return df
+    return df.iloc[:pozicii[0]].copy()
+
+
+def podtverdit_itogovye_summy(df):
+    """Показывает контрольные суммы выписки и просит подтвердить их."""
+    summa_debet = df["Оборот Дт"].fillna(0).sum()
+    summa_kredit = df["Оборот Кт"].fillna(0).sum()
+
+    def format_summy(summa):
+        return f"{summa:,.2f}".replace(",", " ").replace(".", ",")
+
+    print("\nПроверьте итоговые суммы по исходной банковской выписке:")
+    print("Дт:", format_summy(summa_debet))
+    print("Кт:", format_summy(summa_kredit))
+
+    otvet = input("Суммы совпадают? Введите да или нет: ").strip().lower()
+    while otvet not in {"да", "д", "нет", "н"}:
+        otvet = input("Введите 'да' или 'нет': ").strip().lower()
+
+    if otvet in {"нет", "н"}:
+        print("Обработка отменена. Возвращаемся в главное меню.")
+        return False
+    return True
+
+
 def prochitat_vypisku(fil, list_excel=0):
     syrye_dannye = pd.read_excel(fil, sheet_name=list_excel, header=None)
 
@@ -80,6 +120,11 @@ def prochitat_vypisku(fil, list_excel=0):
         "Счёт": "Счет",
     })
 
+    # В некоторых выписках ИТОГО находится в объединенной ячейке колонки,
+    # которая не входит в единый формат. Отсекаем итог до reindex, пока эта
+    # служебная надпись еще не потеряна.
+    df = ubrat_itog_i_stroki_posle(df)
+
     # Для всех банков используем одинаковые колонки и одинаковый порядок.
     # Если в банковском формате колонки нет, она останется пустой.
     df = df.reindex(columns=EDINYE_KOLONKI)
@@ -101,15 +146,13 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
             print("Ошибка чтения файла:", oshibka)
             return None, None, None
 
-        # Строку ИТОГО и все строки после нее не берем.
-        stroka_itogo = df.index[
-            df["Документ"].astype(str).str.strip().str.upper() == "ИТОГО:"
-        ]
-        if len(stroka_itogo) > 0:
-            df = df.iloc[:stroka_itogo[0]]
     else:
         fil = tablica.imya
         df = tablica.df.copy()
+
+    # Итоги исключаются как из нового файла, так и из таблицы, которая уже
+    # была загружена в начале сессии. Надпись может стоять в любой колонке.
+    df = ubrat_itog_i_stroki_posle(df)
 
     obyazatelnye_kolonki = [
         "Документ",
@@ -128,6 +171,9 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
     df["Оборот Дт"] = pd.to_numeric(df["Оборот Дт"], errors="coerce")
     df["Оборот Кт"] = pd.to_numeric(df["Оборот Кт"], errors="coerce")
 
+    if not podtverdit_itogovye_summy(df):
+        return None, None, None
+
     if tablica is None:
         # Сохраняем отдельно исходную таблицу, подготовленную для обработки.
         imya_ishodnoy = os.path.splitext(os.path.basename(fil))[0] + ".xlsx"
@@ -136,16 +182,22 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
         )
 
     naznachenie = df["Назначение платежа"].fillna("").astype(str)
+    oplata_ili_vozmeshenie = naznachenie.str.contains(
+        r"Оплата по дог|Возм\. по дог\.", case=False
+    )
+    est_debet = df["Оборот Дт"].fillna(0) != 0
+    est_kredit = df["Оборот Кт"].fillna(0) != 0
 
     conditions = [
-        naznachenie.str.contains(r"Оплата по дог|Возм\. по дог\.", case=False),
+        oplata_ili_vozmeshenie & est_kredit,
+        oplata_ili_vozmeshenie & est_debet,
         naznachenie.str.contains(r"Оплата за тех\. обслуживание", case=False),
-        naznachenie.str.contains("Оплата", case=False),
-        naznachenie.str.contains("Выплата процентов согласно депозитного договора", case=False),
-        naznachenie.str.contains("Пополнение счета согласно депозитного договора", case=False),
-        naznachenie.str.contains("Возврат депозитн|Возврат согласно депозитн", case=False),
+        naznachenie.str.contains("пени|штраф|взыскания|неустойка", case=False),
+        naznachenie.str.contains("Выплата процентов согласно депозитного договора|УПЛАТА ПРОЦЕНТОВ ДЕПОЗИТ", case=False),
+        naznachenie.str.contains("Пополнение счета согласно депозитного договора|Размещение денежных средств во Вклад", case=False),
+        naznachenie.str.contains("Возврат депозитн|Возврат согласно депозитн|ВОЗВРАТ ДЕПОЗИТ", case=False),
         naznachenie.str.contains("аренд", case=False),
-        naznachenie.str.contains("Единый налоговый платеж|Единый социальный налог|Страховые взносы|пени", case=False),
+        naznachenie.str.contains("Единый налоговый платеж|Единый социальный налог|Страховые взносы|единого налог", case=False),
         naznachenie.str.contains("заработной платы|заработная плата", case=False),
         naznachenie.str.contains("Комиссия", case=False),
         naznachenie.str.contains("РАД|Плата оператору", case=False),
@@ -153,6 +205,9 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
         naznachenie.str.contains("Выдача денежных средств", case=False),
         naznachenie.str.contains("Перевод собственных средств", case=False),
         naznachenie.str.contains("Возврат средств|Возврат денежных средств", case=False),
+        naznachenie.str.contains("топлив", case=False),
+        naznachenie.str.contains("обеспечени|гаранти", case=False),
+        naznachenie.str.contains("Оплата", case=False),
     ]
 
     tipy = {
@@ -170,14 +225,18 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
         12: "ПО",
         13: "снятие дс",
         14: "перевод сс",
-        15: "возврат средств"
+        15: "возврат средств",
+        16: "ППР",
+        17: "штрафы",
+        18: "БГ",
     }
 
     # Типы здесь идут в том же порядке, что и автоматические условия выше.
     avtomaticheskie_tipy = [
         "пришло",
+        "ППР",
         "ПО",
-        "товар",
+        "штрафы",
         "% депозит",
         "депозит",
         "депозит возврат",
@@ -190,6 +249,9 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
         "снятие дс",
         "перевод сс",
         "возврат средств",
+        "ППР",
+        "БГ",
+        "товар",
     ]
 
     df["Тип операции"] = np.select(
@@ -212,15 +274,21 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
     fail_nerasp = os.path.join(
         papka_rezultatov, imya_bez_rasshireniya + "_нераспознанные.xlsx"
     )
-    nerasp[["Оборот Дт", "Оборот Кт", "Назначение платежа"]].to_excel(
-        fail_nerasp, index=False
-    )
+    tablica_nerasp = None
+    if not nerasp.empty:
+        nerasp[["Оборот Дт", "Оборот Кт", "Назначение платежа"]].to_excel(
+            fail_nerasp, index=False
+        )
+        tablica_nerasp = Tablica(fail_nerasp, nerasp.copy())
 
     print("\nТипы операций:")
     for nomer, tip in tipy.items():
         print(nomer, "-", tip)
     print("\nСохрани таблицу или сфоткай")
-    print("Нераспознанные операции сохранены в файле:", fail_nerasp)
+    if tablica_nerasp is not None:
+        print("Нераспознанные операции сохранены в файле:", fail_nerasp)
+    else:
+        print("Все операции распознаны, отдельный файл не создается")
 
     # Ручное распределение оставшихся операций.
     for index in df.index[df["Тип операции"] == "другое"]:
@@ -247,5 +315,5 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
     return (
         novaya_tablica,
         Tablica(fail_rezultat, df),
-        Tablica(fail_nerasp, nerasp.copy()),
+        tablica_nerasp,
     )

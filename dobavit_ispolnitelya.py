@@ -1,5 +1,6 @@
 import os
 import re
+from bisect import bisect_right
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import pandas as pd
@@ -8,78 +9,182 @@ from tablica import Tablica
 
 
 def normalizovat_tekst(tekst):
+    if pd.isna(tekst):
+        return ""
     return " ".join(str(tekst).strip().lower().replace("ё", "е").split())
 
 
-def nayti_kolonku(kolonki, obyazatelnye_slova):
-    for kolonka in kolonki:
-        nazvanie = normalizovat_tekst(kolonka)
-        if all(slovo in nazvanie for slovo in obyazatelnye_slova):
-            return kolonka
-    return None
+def vybrat_format_tablic_ispolniteley():
+    print("\nКакие таблицы исполнителей использовать?")
+    print("1 - подготовленные таблицы")
+    print("2 - старые таблицы")
+    print("-1 - вернуться в главное меню")
+
+    vybor = input("Введите номер: ").strip()
+    while vybor not in {"1", "2", "-1"}:
+        vybor = input("Нет такого номера. Введите еще раз: ").strip()
+    return vybor
 
 
-def prochitat_operacii_cheloveka(fil, chelovek):
+def prochitat_staryi_istochnik(
+    fil,
+    list_excel,
+    chelovek,
+    konkurs,
+    kolonka_daty,
+    kolonka_naimenovaniya,
+    kolonka_firmy,
+    kolonka_summy,
+):
+    df = pd.read_excel(fil, sheet_name=list_excel)
+    kolonki = {
+        normalizovat_tekst(kolonka): kolonka for kolonka in df.columns
+    }
+    trebovaniya = {
+        "Дата оплаты": kolonka_daty,
+        "Наименование": kolonka_naimenovaniya,
+        "Фирма": kolonka_firmy,
+        "Сумма оплаты": kolonka_summy,
+    }
+
+    net_kolonok = [
+        ishodnoe
+        for ishodnoe in trebovaniya.values()
+        if normalizovat_tekst(ishodnoe) not in kolonki
+    ]
+    if net_kolonok:
+        raise ValueError(
+            f"в листе '{list_excel}' файла '{os.path.basename(fil)}' "
+            f"не найдены колонки: {', '.join(net_kolonok)}"
+        )
+
+    rezultat = pd.DataFrame({
+        novoe: df[kolonki[normalizovat_tekst(ishodnoe)]]
+        for novoe, ishodnoe in trebovaniya.items()
+    })
+    rezultat["Исполнитель"] = chelovek
+    rezultat["Конкурс"] = "да" if konkurs else "нет"
+    rezultat["Сумма оплаты"] = pd.to_numeric(
+        rezultat["Сумма оплаты"], errors="coerce"
+    )
+    return rezultat.dropna(subset=["Сумма оплаты"])
+
+
+def prochitat_starye_tablicy(papka_staryh):
+    fayly = {
+        "Влад8.xlsx": os.path.join(papka_staryh, "Влад8.xlsx"),
+        "ВладК8.xlsx": os.path.join(papka_staryh, "ВладК8.xlsx"),
+        "Дима8.xlsx": os.path.join(papka_staryh, "Дима8.xlsx"),
+        "Леша8.xlsx": os.path.join(papka_staryh, "Леша8.xlsx"),
+    }
+    net_faylov = [imya for imya, put in fayly.items() if not os.path.isfile(put)]
+    if net_faylov:
+        print(
+            "Ошибка: в папке 'Старые таблицы' не найдены файлы:",
+            ", ".join(net_faylov),
+        )
+        return None
+
+    bt = {
+        "kolonka_daty": "Дата оплаты заказчиком",
+        "kolonka_naimenovaniya": "Номенклатура по нашей отгрузочной",
+        "kolonka_firmy": "Фирма Поставщик",
+        "kolonka_summy": "Сумма оплаты заказчиком",
+    }
+
+    try:
+        istochniki = [
+            prochitat_staryi_istochnik(
+                fayly["Влад8.xlsx"], 0, "Владимир", False, **bt
+            ),
+            prochitat_staryi_istochnik(
+                fayly["ВладК8.xlsx"], 0, "Владимир", True,
+                kolonka_daty="Дата оплаты Россетями",
+                kolonka_naimenovaniya="наменование",
+                kolonka_firmy="Фирма",
+                kolonka_summy="Сумма оплаты с НДС",
+            ),
+            prochitat_staryi_istochnik(
+                fayly["Дима8.xlsx"], 0, "Дмитрий", False, **bt
+            ),
+            prochitat_staryi_istochnik(
+                fayly["Леша8.xlsx"], 0, "Алексей", False, **bt
+            ),
+            prochitat_staryi_istochnik(
+                fayly["Леша8.xlsx"], 1, "Алексей", True,
+                kolonka_daty="Дата оплаты Россетями",
+                kolonka_naimenovaniya="наменование",
+                kolonka_firmy="Фирма",
+                kolonka_summy="Сумма",
+            ),
+        ]
+    except Exception as oshibka:
+        print("Ошибка чтения старых таблиц:", oshibka)
+        return None
+
+    print("Старые таблицы успешно прочитаны из папки:", papka_staryh)
+    return istochniki
+
+
+def prochitat_podgotovlennye_operacii(fil, chelovek, konkurs):
     excel = pd.ExcelFile(fil)
 
     for list_excel in excel.sheet_names:
         df = pd.read_excel(fil, sheet_name=list_excel)
-
-        kolonka_summa = nayti_kolonku(
-            df.columns, ["сумма", "оплат", "заказчик"]
-        )
-        kolonka_data = nayti_kolonku(
-            df.columns, ["дата", "оплат", "заказчик"]
-        )
-        kolonka_postavshik = nayti_kolonku(
-            df.columns, ["фирма", "постав"]
-        )
-        kolonka_nomenklatura = nayti_kolonku(
-            df.columns, ["номенклатур"]
-        )
-
-        naydennye = [
-            kolonka_summa,
-            kolonka_data,
-            kolonka_postavshik,
-            kolonka_nomenklatura,
+        kolonki = {
+            normalizovat_tekst(kolonka): kolonka for kolonka in df.columns
+        }
+        obyazatelnye = [
+            "Дата оплаты",
+            "Номер",
+            "Наименование",
+            "Фирма",
+            "Сумма оплаты",
+            "страховка",
+            "сумма закупки",
         ]
-        if all(kolonka is not None for kolonka in naydennye):
-            rezultat = df[naydennye].copy()
-            rezultat.columns = [
-                "Сумма оплаты заказчиком",
-                "Дата оплаты заказчиком",
-                "Фирма поставщик",
-                "Номенклатура",
+
+        if all(normalizovat_tekst(kolonka) in kolonki for kolonka in obyazatelnye):
+            ishodnye_kolonki = [
+                kolonki[normalizovat_tekst(kolonka)]
+                for kolonka in obyazatelnye
             ]
+            rezultat = df[ishodnye_kolonki].copy()
+            rezultat.columns = obyazatelnye
             rezultat["Исполнитель"] = chelovek
-            rezultat["Сумма оплаты заказчиком"] = pd.to_numeric(
-                rezultat["Сумма оплаты заказчиком"], errors="coerce"
+            rezultat["Конкурс"] = "да" if konkurs else "нет"
+            rezultat["Сумма оплаты"] = pd.to_numeric(
+                rezultat["Сумма оплаты"], errors="coerce"
             )
-            rezultat = rezultat.dropna(subset=["Сумма оплаты заказчиком"])
-            rezultat = rezultat[
-                rezultat[["Фирма поставщик", "Номенклатура"]]
-                .notna()
-                .any(axis=1)
-            ]
+            rezultat["страховка"] = pd.to_numeric(
+                rezultat["страховка"], errors="coerce"
+            )
+            rezultat["сумма закупки"] = pd.to_numeric(
+                rezultat["сумма закупки"], errors="coerce"
+            )
+            rezultat = rezultat.dropna(subset=["Сумма оплаты"])
             return rezultat
 
     raise ValueError(
-        "Не найдены колонки с суммой, датой оплаты, "
-        "фирмой поставщиком и номенклатурой"
+        "Не найдены колонки: Дата оплаты, Номер, Наименование, "
+        "Фирма, Сумма оплаты, страховка и сумма закупки"
     )
 
 
-def sprosit_operacii_cheloveka(chelovek):
+def sprosit_podgotovlennye_operacii(chelovek, konkurs):
+    vid = "конкурс" if konkurs else "б/т"
     while True:
         fil = input(
-            f"Введите название файла с операциями {chelovek} (-1 — назад): "
+            f"Введите название файла с операциями {chelovek} "
+            f"({vid}) (-1 — назад): "
         ).strip()
         if fil == "-1":
             return None, None
 
         try:
-            operacii = prochitat_operacii_cheloveka(fil, chelovek)
+            operacii = prochitat_podgotovlennye_operacii(
+                fil, chelovek, konkurs
+            )
             return fil, operacii
         except Exception as oshibka:
             print("Ошибка чтения файла:", oshibka)
@@ -153,10 +258,27 @@ def poluchit_summu_osnovnoy_tablicy(df, index):
     return tochnaya_summa(summa)
 
 
-def zapisat_odinochnoe_sovpadenie(df, index, naydeno):
+def zapisat_sovpadenie(df, index, naydeno, stroki_sovpadeniya=None):
     df.loc[index, "Исполнитель"] = naydeno["Исполнитель"]
-    df.loc[index, "Номенклатура"] = naydeno["Номенклатура"]
-    df.loc[index, "Фирма поставщик"] = naydeno["Фирма поставщик"]
+    df.loc[index, "Номер"] = naydeno.get("Номер")
+    df.loc[index, "Наименование"] = naydeno["Наименование"]
+    df.loc[index, "Фирма"] = naydeno["Фирма"]
+    df.loc[index, "Конкурс"] = naydeno["Конкурс"]
+
+    if stroki_sovpadeniya is None:
+        df.loc[index, "Страховка"] = naydeno.get("страховка")
+        df.loc[index, "Затраты"] = naydeno.get("сумма закупки")
+    else:
+        def summa_kolonki(kolonka):
+            if kolonka not in stroki_sovpadeniya.columns:
+                return float("nan")
+            chisla = pd.to_numeric(
+                stroki_sovpadeniya[kolonka], errors="coerce"
+            )
+            return chisla.sum(min_count=1)
+
+        df.loc[index, "Страховка"] = summa_kolonki("страховка")
+        df.loc[index, "Затраты"] = summa_kolonki("сумма закупки")
 
 
 def nayti_kombinacii(indexy, nuzhnaya_summa, spravochnik, ispolzovannye):
@@ -168,31 +290,51 @@ def nayti_kombinacii(indexy, nuzhnaya_summa, spravochnik, ispolzovannye):
         if summa is not None and summa > 0 and summa <= nuzhnaya_summa:
             dostupnye.append((index, summa))
 
-    dostupnye.sort(key=lambda para: para[1], reverse=True)
+    # Проверяем только комбинации из двух и трех строк. Для троек заранее
+    # группируем позиции по сумме, поэтому полный перебор 2^N не возникает.
     rezultaty = []
+    pozicii_po_summe = {}
+    for poziciya, (_, summa) in enumerate(dostupnye):
+        pozicii_po_summe.setdefault(summa, []).append(poziciya)
 
-    def perebor(poziciya, tekushaya_summa, vybrannye):
-        if len(rezultaty) > 1:
-            return
-        if tekushaya_summa == nuzhnaya_summa:
-            if len(vybrannye) >= 2:
-                rezultaty.append(tuple(vybrannye))
-            return
-        if tekushaya_summa > nuzhnaya_summa:
-            return
+    def dobavit_rezultat(pozicii):
+        kombinaciya = tuple(dostupnye[poziciya][0] for poziciya in pozicii)
+        if kombinaciya not in rezultaty:
+            rezultaty.append(kombinaciya)
+        return len(rezultaty) >= 2
 
-        for nomer in range(poziciya, len(dostupnye)):
-            index, summa = dostupnye[nomer]
-            novaya_summa = tekushaya_summa + summa
-            if novaya_summa <= nuzhnaya_summa:
-                perebor(nomer + 1, novaya_summa, vybrannye + [index])
+    # Сначала пары.
+    for pervaya in range(len(dostupnye)):
+        ostatok = nuzhnaya_summa - dostupnye[pervaya][1]
+        pozicii = pozicii_po_summe.get(ostatok, [])
+        nachalo = bisect_right(pozicii, pervaya)
+        for vtoraya in pozicii[nachalo:nachalo + 2]:
+            if dobavit_rezultat((pervaya, vtoraya)):
+                return rezultaty
 
-    perebor(0, Decimal("0.00"), [])
+    # Затем тройки.
+    for pervaya in range(len(dostupnye)):
+        for vtoraya in range(pervaya + 1, len(dostupnye)):
+            ostatok = (
+                nuzhnaya_summa
+                - dostupnye[pervaya][1]
+                - dostupnye[vtoraya][1]
+            )
+            pozicii = pozicii_po_summe.get(ostatok, [])
+            nachalo = bisect_right(pozicii, vtoraya)
+            for tretya in pozicii[nachalo:nachalo + 2]:
+                if dobavit_rezultat((pervaya, vtoraya, tretya)):
+                    return rezultaty
+
     return rezultaty
 
 
 def dobavit_ispolnitelya(
-    tablica=None, papka_rezultatov=".", god=None, mesyac=None
+    tablica=None,
+    papka_rezultatov=".",
+    god=None,
+    mesyac=None,
+    gotovye_operacii=None,
 ):
     novye_tablicy = []
 
@@ -231,10 +373,15 @@ def dobavit_ispolnitelya(
         df["Исполнитель"] = None
     df["Исполнитель"] = df["Исполнитель"].astype("object")
 
-    if "Номенклатура" not in df.columns:
-        df["Номенклатура"] = None
-    if "Фирма поставщик" not in df.columns:
-        df["Фирма поставщик"] = None
+    for kolonka in ["Номер", "Наименование", "Фирма", "Конкурс"]:
+        if kolonka not in df.columns:
+            df[kolonka] = None
+        df[kolonka] = df[kolonka].astype("object")
+
+    for kolonka in ["Страховка", "Затраты"]:
+        if kolonka not in df.columns:
+            df[kolonka] = float("nan")
+        df[kolonka] = pd.to_numeric(df[kolonka], errors="coerce")
 
     # Исполнитель для товарных операций определяется по букве в назначении.
     for index in df.index[df["Тип операции"] == "товар"]:
@@ -251,12 +398,22 @@ def dobavit_ispolnitelya(
 
     stroki_prishlo = df.index[df["Тип операции"] == "пришло"]
     if len(stroki_prishlo) > 0:
-        vse_operacii = []
-        for chelovek in ["Алексей", "Владимир", "Дмитрий"]:
-            _, operacii = sprosit_operacii_cheloveka(chelovek)
-            if operacii is None:
-                return novye_tablicy, None
-            vse_operacii.append(operacii)
+        if gotovye_operacii is None:
+            vse_operacii = []
+            for chelovek in ["Алексей", "Владимир", "Дмитрий"]:
+                for konkurs in [True, False]:
+                    _, operacii = sprosit_podgotovlennye_operacii(
+                        chelovek, konkurs
+                    )
+                    if operacii is None:
+                        return novye_tablicy, None
+                    vse_operacii.append(operacii)
+        else:
+            vse_operacii = gotovye_operacii
+
+        vse_operacii = [operacii.copy() for operacii in vse_operacii]
+        for nomer_istochnika, operacii in enumerate(vse_operacii):
+            operacii["Источник"] = nomer_istochnika
 
         spravochnik = pd.concat(vse_operacii, ignore_index=True)
         mesyac_chislom = nomer_mesaca(mesyac)
@@ -264,9 +421,9 @@ def dobavit_ispolnitelya(
             print("Ошибка: не удалось определить рабочий год или месяц")
             return novye_tablicy, None
 
-        spravochnik["Даты оплаты"] = spravochnik[
-            "Дата оплаты заказчиком"
-        ].apply(poluchit_daty)
+        spravochnik["Даты оплаты"] = spravochnik["Дата оплаты"].apply(
+            poluchit_daty
+        )
         spravochnik = spravochnik[
             spravochnik["Даты оплаты"].apply(
                 lambda daty: any(
@@ -277,12 +434,23 @@ def dobavit_ispolnitelya(
         ].copy()
         spravochnik.reset_index(drop=True, inplace=True)
 
-        spravochnik["Точная сумма"] = spravochnik[
-            "Сумма оплаты заказчиком"
-        ].apply(tochnaya_summa)
-        spravochnik["Поставщик для сравнения"] = spravochnik[
-            "Фирма поставщик"
+        spravochnik["Точная сумма"] = spravochnik["Сумма оплаты"].apply(
+            tochnaya_summa
+        )
+        spravochnik["Наименование для сравнения"] = spravochnik[
+            "Наименование"
         ].apply(normalizovat_tekst)
+        if "Номер" not in spravochnik.columns:
+            spravochnik["Номер"] = None
+        spravochnik["Номер для сравнения"] = spravochnik["Номер"].apply(
+            normalizovat_tekst
+        )
+        spravochnik["Группа для сравнения"] = spravochnik[
+            "Номер для сравнения"
+        ].where(
+            spravochnik["Номер для сравнения"] != "",
+            spravochnik["Наименование для сравнения"],
+        )
 
         ispolzovannye_stroki = set()
         neraspredelennye_stroki = []
@@ -297,26 +465,26 @@ def dobavit_ispolnitelya(
 
             if len(kandidaty) == 1:
                 naydeno = kandidaty.iloc[0]
-                zapisat_odinochnoe_sovpadenie(df, index, naydeno)
+                zapisat_sovpadenie(df, index, naydeno)
                 ispolzovannye_stroki.add(kandidaty.index[0])
             else:
                 neraspredelennye_stroki.append(index)
 
-        # Для каждого человека, каждой даты и каждого поставщика формируем
-        # отдельную группу. Люди и даты между собой никогда не смешиваются.
+        # В новых таблицах комбинации группируются по номеру и дате. Для
+        # старых таблиц без номера временно используется наименование.
         gruppy = {}
         for spravochnik_index, stroka in spravochnik.iterrows():
-            postavshik = stroka["Поставщик для сравнения"]
-            if not postavshik:
+            gruppa = stroka["Группа для сравнения"]
+            if not gruppa:
                 continue
             for data in stroka["Даты оплаты"]:
                 if data.year != int(god) or data.month != mesyac_chislom:
                     continue
-                kluch = (stroka["Исполнитель"], data, postavshik)
+                kluch = (stroka["Источник"], data, gruppa)
                 gruppy.setdefault(kluch, []).append(spravochnik_index)
 
-        # Затем для оставшихся операций перебираем комбинации из двух,
-        # трех и большего числа еще не использованных покупок.
+        # Затем для оставшихся операций проверяем комбинации из двух и трех
+        # еще не использованных покупок.
         vse_eshe_ne_naydennye = []
 
         for index in neraspredelennye_stroki:
@@ -339,20 +507,14 @@ def dobavit_ispolnitelya(
                         break
 
             if len(podhodyashie_kombinacii) == 1:
-                kluch, kombinaciya = podhodyashie_kombinacii[0]
-                chelovek, _, _ = kluch
+                _, kombinaciya = podhodyashie_kombinacii[0]
                 pervaya = spravochnik.loc[kombinaciya[0]]
-
-                nomenklatura = None
-                for spravochnik_index in kombinaciya:
-                    tekushaya = spravochnik.loc[spravochnik_index, "Номенклатура"]
-                    if not pd.isna(tekushaya) and str(tekushaya).strip():
-                        nomenklatura = tekushaya
-                        break
-
-                df.loc[index, "Исполнитель"] = chelovek
-                df.loc[index, "Номенклатура"] = nomenklatura
-                df.loc[index, "Фирма поставщик"] = pervaya["Фирма поставщик"]
+                zapisat_sovpadenie(
+                    df,
+                    index,
+                    pervaya,
+                    spravochnik.loc[list(kombinaciya)],
+                )
                 ispolzovannye_stroki.update(kombinaciya)
             else:
                 vse_eshe_ne_naydennye.append(index)
