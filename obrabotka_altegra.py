@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 
 from tablica import Tablica
+from tablica_vseh_operaciy import nayti_nashu_kompaniyu
 
 
 EDINYE_KOLONKI = [
@@ -58,11 +59,15 @@ def podtverdit_itogovye_summy(df):
     print("Дт:", format_summy(summa_debet))
     print("Кт:", format_summy(summa_kredit))
 
-    otvet = input("Суммы совпадают? Введите да или нет: ").strip().lower()
-    while otvet not in {"да", "д", "нет", "н"}:
-        otvet = input("Введите 'да' или 'нет': ").strip().lower()
+    polozhitelnye_otvety = {"да", "д", "yes", "y"}
+    otricatelnye_otvety = {"нет", "н", "no", "n"}
+    dopustimye_otvety = polozhitelnye_otvety | otricatelnye_otvety
 
-    if otvet in {"нет", "н"}:
+    otvet = input("Суммы совпадают? Введите да/нет или yes/no: ").strip().lower()
+    while otvet not in dopustimye_otvety:
+        otvet = input("Введите да/нет или yes/no: ").strip().lower()
+
+    if otvet in otricatelnye_otvety:
         print("Обработка отменена. Возвращаемся в главное меню.")
         return False
     return True
@@ -185,28 +190,55 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
     oplata_ili_vozmeshenie = naznachenie.str.contains(
         r"Оплата по дог|Возм\. по дог\.", case=False
     )
+    obespechenie_ili_garantiya = naznachenie.str.contains(
+        r"обеспеч|гарант", case=False
+    )
+    bankovskaya_komissiya = naznachenie.str.contains(
+        r"комиссия|ком\.\s*за", case=False
+    )
+    vozvrat_depozita = (
+        naznachenie.str.contains(r"возврат", case=False)
+        & naznachenie.str.contains(r"депозит", case=False)
+    )
+    kontragent = df["Корреспондент"].fillna("").astype(str)
+    kontragent_rad = kontragent.str.contains(r"РАД", case=False)
+    kontragent_okean_servis = kontragent.str.contains(
+        r"океан[\s-]*сервис", case=False
+    )
+    oplata_za_tehobsluzhivanie = (
+        naznachenie.str.contains(
+            r"Оплата за тех\. обслуживание", case=False
+        )
+        | (
+            naznachenie.str.contains(
+                r"оплата\s+за\s+тех\.?\s*обслуж", case=False
+            )
+            & kontragent_okean_servis
+        )
+    )
     est_debet = df["Оборот Дт"].fillna(0) != 0
     est_kredit = df["Оборот Кт"].fillna(0) != 0
 
     conditions = [
+        vozvrat_depozita,
+        obespechenie_ili_garantiya & kontragent_rad & ~bankovskaya_komissiya,
+        obespechenie_ili_garantiya & ~kontragent_rad & ~bankovskaya_komissiya,
         oplata_ili_vozmeshenie & est_kredit,
         oplata_ili_vozmeshenie & est_debet,
-        naznachenie.str.contains(r"Оплата за тех\. обслуживание", case=False),
-        naznachenie.str.contains("пени|штраф|взыскания|неустойка", case=False),
+        oplata_za_tehobsluzhivanie,
+        naznachenie.str.contains("пени|штраф|взыск|неустойк", case=False),
         naznachenie.str.contains("Выплата процентов согласно депозитного договора|УПЛАТА ПРОЦЕНТОВ ДЕПОЗИТ", case=False),
         naznachenie.str.contains("Пополнение счета согласно депозитного договора|Размещение денежных средств во Вклад", case=False),
-        naznachenie.str.contains("Возврат депозитн|Возврат согласно депозитн|ВОЗВРАТ ДЕПОЗИТ", case=False),
         naznachenie.str.contains("аренд", case=False),
-        naznachenie.str.contains("Единый налоговый платеж|Единый социальный налог|Страховые взносы|единого налог", case=False),
+        naznachenie.str.contains("налог|Страховые взносы", case=False),
         naznachenie.str.contains("заработной платы|заработная плата", case=False),
-        naznachenie.str.contains("Комиссия", case=False),
+        bankovskaya_komissiya,
         naznachenie.str.contains("РАД|Плата оператору", case=False),
         naznachenie.str.contains("Займ|займ", case=False),
-        naznachenie.str.contains("Выдача денежных средств", case=False),
+        naznachenie.str.contains("Выдача денежных средств|Снятие по карте", case=False),
         naznachenie.str.contains("Перевод собственных средств", case=False),
         naznachenie.str.contains("Возврат средств|Возврат денежных средств", case=False),
         naznachenie.str.contains("топлив", case=False),
-        naznachenie.str.contains("обеспечени|гаранти", case=False),
         naznachenie.str.contains("Оплата", case=False),
     ]
 
@@ -233,13 +265,15 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
 
     # Типы здесь идут в том же порядке, что и автоматические условия выше.
     avtomaticheskie_tipy = [
+        "депозит возврат",
+        "РАД",
+        "БГ",
         "пришло",
         "ППР",
         "ПО",
         "штрафы",
         "% депозит",
         "депозит",
-        "депозит возврат",
         "аренда",
         "налог",
         "ЗП",
@@ -250,7 +284,6 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
         "перевод сс",
         "возврат средств",
         "ППР",
-        "БГ",
         "товар",
     ]
 
@@ -259,6 +292,15 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
         avtomaticheskie_tipy,
         default="другое",
     )
+
+    # Общая формулировка "Оплата" обычно означает товар. Но если деньги
+    # переводятся между нашими компаниями, это собственные средства, а не
+    # покупка товара. Проверяем обе стороны: операции в Дт и в Кт.
+    nash_kontragent = df["Корреспондент"].apply(nayti_nashu_kompaniyu)
+    df.loc[
+        (df["Тип операции"] == "товар") & nash_kontragent.notna(),
+        "Тип операции",
+    ] = "перевод сс"
 
     # Товар не может быть приходом.
     df.loc[

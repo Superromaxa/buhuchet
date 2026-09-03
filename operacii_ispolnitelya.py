@@ -181,14 +181,22 @@ def sobrat_operacii_ispolnitelya(tablicy, papka_goda=".", god=""):
         provereno = staraya_tablica["проверено"].fillna("").astype(str).str.strip()
         staraya_tablica.loc[provereno == "", "проверено"] = "нет"
 
+    operacii["отслежено"] = "нет"
+    if "отслежено" not in staraya_tablica.columns:
+        staraya_tablica["отслежено"] = "нет"
+    else:
+        otslezheno = staraya_tablica["отслежено"].fillna("").astype(str).str.strip()
+        staraya_tablica.loc[otslezheno == "", "отслежено"] = "нет"
+
     novyi_df = pd.concat(
         [staraya_tablica, operacii], ignore_index=True
     )
-    # Колонка проверки всегда должна быть последней.
+    # Статусы идут в конце, «отслежено» всегда последняя колонка.
     ostalnye_kolonki = [
-        kolonka for kolonka in novyi_df.columns if kolonka != "проверено"
+        kolonka for kolonka in novyi_df.columns
+        if kolonka not in {"проверено", "отслежено"}
     ]
-    novyi_df = novyi_df[ostalnye_kolonki + ["проверено"]]
+    novyi_df = novyi_df[ostalnye_kolonki + ["проверено", "отслежено"]]
 
     # Если итоговый файл уже был загружен в этой сессии, обновляем его DataFrame.
     rezultat = None

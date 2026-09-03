@@ -13,6 +13,7 @@ from tablica import Tablica
 
 NOL = Decimal("0.00")
 SHAG = Decimal("0.01")
+KOLONKI_ITOGA = ["Дата", "Фирма", "Тип", "Подтип", "Сумма"]
 
 STROKI_ITOGA = [
     ("Денежные средства", "р/с"),
@@ -34,10 +35,12 @@ STROKI_ITOGA = [
     ("Прибыль", "Дмитрий"),
     ("Прибыль", "% депозит"),
     ("Прибыль", "Возврат налога"),
+    ("Прибыль", "Штраф"),
     ("Убыток", "Эквайринг"),
     ("Убыток", "Эквайринг НДС"),
     ("Убыток", "Офис"),
     ("Убыток", "Снятие"),
+    ("Убыток", "Штраф"),
 ]
 
 SOTRUDNIKI_TOVARA = {
@@ -51,7 +54,7 @@ SOTRUDNIKI_PRIBYLI = {
     "владимир": "Владимир",
     "дмитрий": "Дмитрий",
 }
-OFISNYE_TIPY = {"банк комиссия", "штрафы", "по", "зп", "аренда"}
+OFISNYE_TIPY = {"банк комиссия", "по", "зп", "аренда"}
 
 
 def normalizovat_tekst(znachenie):
@@ -158,6 +161,59 @@ def vybrat_neskolko_tablic(tablicy):
         except ValueError:
             pass
         vybor = input("Нет таких номеров. Введите еще раз: ").strip()
+
+
+def vybrat_sposob_sohraneniya(tablicy, papka_mesaca, god):
+    print("\nКак сохранить итоговую таблицу?")
+    print("1 - создать новую")
+    print("2 - дописать в существующую")
+    print("-1 - вернуться в главное меню")
+
+    vybor = input("Введите номер пункта: ").strip()
+    while vybor not in {"1", "2", "-1"}:
+        vybor = input("Нет такого номера. Введите еще раз: ").strip()
+
+    if vybor == "-1":
+        return None, False
+
+    if vybor == "1":
+        papka_goda = os.path.dirname(papka_mesaca)
+        imya = os.path.join(papka_goda, f"итоговая_таблица_{god}.xlsx")
+        if os.path.exists(imya):
+            print(
+                "Файл уже существует:", imya,
+                "\nЧтобы сохранить данные в него, выберите пункт "
+                "'дописать в существующую'."
+            )
+            return None, False
+        return Tablica(imya, pd.DataFrame(columns=KOLONKI_ITOGA)), True
+
+    podhodyashie = [
+        tablica
+        for tablica in tablicy
+        if list(tablica.df.columns) == KOLONKI_ITOGA
+    ]
+    if not podhodyashie:
+        print(
+            "В текущей сессии нет загруженной итоговой таблицы. "
+            "Загрузите её в начале работы или через дополнительные возможности."
+        )
+        return None, False
+
+    print("\nВыберите существующую итоговую таблицу:")
+    for nomer, tablica in enumerate(podhodyashie, start=1):
+        print(nomer, "-", tablica.imya)
+    print("-1 - вернуться в главное меню")
+
+    nomer = input("Введите номер таблицы: ").strip()
+    while nomer != "-1" and (
+        not nomer.isdigit() or not 1 <= int(nomer) <= len(podhodyashie)
+    ):
+        nomer = input("Нет такого номера. Введите еще раз: ").strip()
+
+    if nomer == "-1":
+        return None, False
+    return podhodyashie[int(nomer) - 1], False
 
 
 def poluchit_komissiyu_i_nds(stroka, kolonki, naznachenie):
@@ -349,6 +405,8 @@ def rasschitat_firmu(tablica, data_itoga):
             itogi[("Прибыль", "% депозит")] += summa
         elif tip == "налог" and kt != NOL:
             itogi[("Прибыль", "Возврат налога")] += kt
+        elif tip == "штрафы" and kt != NOL:
+            itogi[("Прибыль", "Штраф")] += kt
         elif tip == "пришло":
             chelovek = SOTRUDNIKI_PRIBYLI.get(ispolnitel)
             if chelovek is None:
@@ -367,6 +425,8 @@ def rasschitat_firmu(tablica, data_itoga):
             itogi[("Прибыль", chelovek)] += kt - zatraty
         elif tip == "налог" and dt != NOL:
             itogi[("Убыток", "Офис")] += dt
+        elif tip == "штрафы" and dt != NOL:
+            itogi[("Убыток", "Штраф")] += dt
         elif tip in OFISNYE_TIPY:
             itogi[("Убыток", "Офис")] += summa
         elif tip in {"снятие сс", "снятие дс"}:
@@ -422,14 +482,23 @@ def sformirovat_itogovuyu_tablicu(tablicy, papka_mesaca, god, mesyac, mesyac_chi
         vse_stroki.extend(stroki)
         vse_neuchtennye.extend(neuchtennye)
 
-    itogovyi_df = pd.DataFrame(
-        vse_stroki, columns=["Дата", "Фирма", "Тип", "Подтип", "Сумма"]
+    itogovyi_df = pd.DataFrame(vse_stroki, columns=KOLONKI_ITOGA)
+    tablica_itoga, novaya_tablica = vybrat_sposob_sohraneniya(
+        tablicy, papka_mesaca, god
     )
-    imya_itoga = os.path.join(papka_mesaca, f"итоговая_таблица_{mesyac}.xlsx")
-    itogovyi_df.to_excel(imya_itoga, index=False)
-    oformit_itogovyi_excel(imya_itoga)
-    rezultaty = [Tablica(imya_itoga, itogovyi_df)]
-    print("\nИтоговая таблица сохранена:", imya_itoga)
+    if tablica_itoga is None:
+        return []
+
+    if tablica_itoga.df.empty:
+        tablica_itoga.df = itogovyi_df.copy()
+    else:
+        tablica_itoga.df = pd.concat(
+            [tablica_itoga.df, itogovyi_df], ignore_index=True
+        )
+    tablica_itoga.df.to_excel(tablica_itoga.imya, index=False)
+    oformit_itogovyi_excel(tablica_itoga.imya)
+    rezultaty = [tablica_itoga] if novaya_tablica else []
+    print("\nИтоговая таблица сохранена:", tablica_itoga.imya)
 
     if vse_neuchtennye:
         neuchtennye_df = pd.DataFrame(vse_neuchtennye)

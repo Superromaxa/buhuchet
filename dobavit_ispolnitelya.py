@@ -14,14 +14,18 @@ def normalizovat_tekst(tekst):
     return " ".join(str(tekst).strip().lower().replace("ё", "е").split())
 
 
-def vybrat_format_tablic_ispolniteley():
+def vybrat_format_tablic_ispolniteley(est_podgruzhennye=False):
     print("\nКакие таблицы исполнителей использовать?")
-    print("1 - подготовленные таблицы")
+    print("1 - новые таблицы (загрузить файлы)")
     print("2 - старые таблицы")
+    dopustimye = {"1", "2", "-1"}
+    if est_podgruzhennye:
+        print("3 - подгруженные новые таблицы этой сессии")
+        dopustimye.add("3")
     print("-1 - вернуться в главное меню")
 
     vybor = input("Введите номер: ").strip()
-    while vybor not in {"1", "2", "-1"}:
+    while vybor not in dopustimye:
         vybor = input("Нет такого номера. Введите еще раз: ").strip()
     return vybor
 
@@ -290,9 +294,12 @@ def nayti_kombinacii(indexy, nuzhnaya_summa, spravochnik, ispolzovannye):
         if summa is not None and summa > 0 and summa <= nuzhnaya_summa:
             dostupnye.append((index, summa))
 
-    # Проверяем только комбинации из двух и трех строк. Для троек заранее
+    # Проверяем сумму всей группы, в том числе из четырех и более строк.
+    # Дополнительно ищем комбинации из двух и трех строк. Для троек заранее
     # группируем позиции по сумме, поэтому полный перебор 2^N не возникает.
     rezultaty = []
+    if len(dostupnye) > 3 and sum(summa for _, summa in dostupnye) == nuzhnaya_summa:
+        rezultaty.append(tuple(index for index, _ in dostupnye))
     pozicii_po_summe = {}
     for poziciya, (_, summa) in enumerate(dostupnye):
         pozicii_po_summe.setdefault(summa, []).append(poziciya)
@@ -335,6 +342,7 @@ def dobavit_ispolnitelya(
     god=None,
     mesyac=None,
     gotovye_operacii=None,
+    kesh_novyh_tablic=None,
 ):
     novye_tablicy = []
 
@@ -408,6 +416,12 @@ def dobavit_ispolnitelya(
                     if operacii is None:
                         return novye_tablicy, None
                     vse_operacii.append(operacii)
+            if kesh_novyh_tablic is not None:
+                # Заменяем набор только после успешной загрузки всех файлов.
+                kesh_novyh_tablic["операции"] = [
+                    operacii.copy() for operacii in vse_operacii
+                ]
+                print("Новые таблицы сохранены в памяти до конца сессии.")
         else:
             vse_operacii = gotovye_operacii
 
@@ -463,7 +477,7 @@ def dobavit_ispolnitelya(
                 & (~spravochnik.index.isin(ispolzovannye_stroki))
             ]
 
-            if len(kandidaty) == 1:
+            if len(kandidaty) >= 1:
                 naydeno = kandidaty.iloc[0]
                 zapisat_sovpadenie(df, index, naydeno)
                 ispolzovannye_stroki.add(kandidaty.index[0])
@@ -483,8 +497,8 @@ def dobavit_ispolnitelya(
                 kluch = (stroka["Источник"], data, gruppa)
                 gruppy.setdefault(kluch, []).append(spravochnik_index)
 
-        # Затем для оставшихся операций проверяем комбинации из двух и трех
-        # еще не использованных покупок.
+        # Затем для оставшихся операций проверяем суммы групп и комбинации
+        # из двух и трех еще не использованных покупок.
         vse_eshe_ne_naydennye = []
 
         for index in neraspredelennye_stroki:

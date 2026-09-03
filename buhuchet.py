@@ -162,6 +162,7 @@ os.makedirs(papka_mesaca, exist_ok=True)
 print("Рабочая папка:", papka_mesaca)
 
 tablicy = zagruzit_tablicy(papka_mesaca, papka_goda)
+kesh_novyh_tablic = {}
 
 while True:
     print("\nВыберите пункт меню")
@@ -203,16 +204,20 @@ while True:
         if rezultat is not None:
             tablicy.append(rezultat)
     elif punkt == "3":
-        format_tablic = vybrat_format_tablic_ispolniteley()
+        format_tablic = vybrat_format_tablic_ispolniteley(
+            est_podgruzhennye="операции" in kesh_novyh_tablic
+        )
         if format_tablic == "-1":
             continue
-        starye_operacii = None
+        gotovye_operacii = None
         if format_tablic == "2":
-            starye_operacii = prochitat_starye_tablicy(
+            gotovye_operacii = prochitat_starye_tablicy(
                 os.path.join(rabochaya_papka, "Старые таблицы")
             )
-            if starye_operacii is None:
+            if gotovye_operacii is None:
                 continue
+        elif format_tablic == "3":
+            gotovye_operacii = kesh_novyh_tablic["операции"]
 
         istochnik = vybrat_tablicu(tablicy)
         if istochnik == "назад":
@@ -223,7 +228,8 @@ while True:
                 papka_mesaca,
                 god,
                 mesyac,
-                gotovye_operacii=starye_operacii,
+                gotovye_operacii=gotovye_operacii,
+                kesh_novyh_tablic=kesh_novyh_tablic,
             )
         except Exception as oshibka:
             print("Ошибка при добавлении исполнителей:", oshibka)
