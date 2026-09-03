@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - VERSION
+      - .github/workflows/windows-release.yml
     tags:
       - "v*"
 
@@ -57,7 +58,7 @@ jobs:
             --clean `
             --onedir `
             --name Buhuchet `
-            --python-option utf8 `
+            --python-option "X utf8=1" `
             --hidden-import openpyxl `
             --hidden-import xlrd `
             buhuchet.py
