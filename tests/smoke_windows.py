@@ -25,8 +25,29 @@ def main():
             [4, "15.09.2026", "Тест", None, 75, "Штраф по договору"],
             ["ИТОГО", None, None, 150, 1075, None],
         ]
-        pd.DataFrame(rows).to_excel(folder / "Выписка.xlsx", header=False, index=False)
-        answers = "2026\nсентябрь\n1\n1\nВыписка.xlsx\nда\n-1\n"
+        bank = pd.DataFrame(rows)
+        for company in [
+            "Альтэгра", "АВК", "Билд", "Вектор", "Макрон", "Позитрон",
+            "Сити", "Кит", "Энергопоинт", "Факторион",
+        ]:
+            bank.to_excel(folder / f"{company}.xlsx", header=False, index=False)
+
+        employee = pd.DataFrame({
+            "Дата оплаты": ["15.09.2026"],
+            "Номер": ["1"],
+            "Наименование": ["Проверка"],
+            "Фирма": ["Тест"],
+            "Сумма оплаты": [100],
+            "страховка": [0],
+            "сумма закупки": [0],
+        })
+        for filename in [
+            "АлексейБТ", "АлексейК", "ВладимирБТ", "ВладимирК",
+            "ДмитрийБТ", "ДмитрийК",
+        ]:
+            employee.to_excel(folder / f"{filename}.xlsx", index=False)
+
+        answers = "2026\nсентябрь\n3\n-1\n"
         result = subprocess.run(
             [str(folder / "Buhuchet.exe")], input=answers,
             text=True, encoding="utf-8", capture_output=True,
@@ -34,11 +55,11 @@ def main():
         )
         if result.returncode != 0 or "Ошибка" in result.stdout:
             raise RuntimeError(result.stdout + result.stderr)
-        output = pd.read_excel(folder / "2026/сентябрь/Выписка_с_типами.xlsx")
+        output = pd.read_excel(folder / "2026/сентябрь/Кит_готовая.xlsx")
         expected = ["ПО", "депозит возврат", "штрафы", "штрафы"]
         if output["Тип операции"].tolist() != expected:
             raise AssertionError(output["Тип операции"].tolist())
-        print("Packaged executable: startup, Cyrillic paths, Excel import/classification/export OK")
+        print("Packaged executable: automatic input check, Cyrillic paths, Excel import/classification/export OK")
 
 
 if __name__ == "__main__":

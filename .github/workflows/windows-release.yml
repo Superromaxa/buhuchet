@@ -70,7 +70,7 @@ jobs:
           Copy-Item 'ПРИМЕР_ЗАПОЛНЕНИЯ_ТАБЛИЦЫ.xlsx' dist/Buhuchet/
           Copy-Item VERSION dist/Buhuchet/
 
-      - name: Test packaged executable
+      - name: Test packaged Windows executable
         run: python tests/smoke_windows.py dist/Buhuchet
 
       - name: Package Windows 11 archive
