@@ -3,6 +3,7 @@ import os
 import pandas as pd
 
 from tablica import Tablica
+from dobavit_ispolnitelya import normalizovat_nomer
 
 
 def normalizovat_tekst(znachenie):
@@ -78,7 +79,7 @@ def rasschitat_premii_sotrudnikov(operacii):
     df["Наименование для расчета"] = df["Наименование"].apply(
         normalizovat_tekst
     )
-    df["Номер для расчета"] = df["Номер"].apply(normalizovat_tekst)
+    df["Номер для расчета"] = df["Номер"].apply(normalizovat_nomer)
     df["Группа для расчета"] = df["Номер для расчета"].where(
         df["Номер для расчета"] != "",
         df["Наименование для расчета"],

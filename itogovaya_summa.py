@@ -37,7 +37,9 @@ def sprosit_chislo(tekst):
             ).strip()
 
 
-def dobavit_itogovuyu_summu(tablica=None, papka_rezultatov="."):
+def dobavit_itogovuyu_summu(
+    tablica=None, papka_rezultatov=".", avtomaticheski=False
+):
     novaya_tablica = None
 
     if tablica is None:
@@ -98,6 +100,11 @@ def dobavit_itogovuyu_summu(tablica=None, papka_rezultatov="."):
             print("Назначение:", naznachenie)
 
         if pd.isna(osnovnaya_summa):
+            if avtomaticheski:
+                raise ValueError(
+                    "не найдена сумма в Дт/Кт для возмещения "
+                    f"в строке Excel {index + 2}"
+                )
             osnovnaya_summa = sprosit_chislo(
                 "Не найдена сумма в Дт/Кт. Введите сумму (-1 — назад): "
             )
@@ -105,6 +112,11 @@ def dobavit_itogovuyu_summu(tablica=None, papka_rezultatov="."):
                 return novaya_tablica, None
 
         if komissiya is None:
+            if avtomaticheski:
+                raise ValueError(
+                    "не найдена комиссия для возмещения "
+                    f"в строке Excel {index + 2}"
+                )
             komissiya = sprosit_chislo(
                 "Не найдена комиссия после 'Ком.'. Введите комиссию (-1 — назад): "
             )
@@ -112,6 +124,11 @@ def dobavit_itogovuyu_summu(tablica=None, papka_rezultatov="."):
                 return novaya_tablica, None
 
         if nds is None:
+            if avtomaticheski:
+                raise ValueError(
+                    "не найден НДС для возмещения "
+                    f"в строке Excel {index + 2}"
+                )
             nds = sprosit_chislo(
                 "Не найдено число после 'НДС'. Введите НДС (-1 — назад): "
             )

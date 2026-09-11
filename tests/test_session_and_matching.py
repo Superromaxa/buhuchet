@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from dobavit_ispolnitelya import dobavit_ispolnitelya
+from dobavit_ispolnitelya import dobavit_ispolnitelya, normalizovat_nomer
 from obrabotka_altegra import dobavit_tip_operacii
 from operacii_ispolnitelya import sobrat_operacii_ispolnitelya
 from sformirovat_itogovuyu_tablicu import rasschitat_firmu
@@ -124,29 +124,83 @@ class SessionAndMatchingTests(unittest.TestCase):
                     result, _ = sobrat_operacii_ispolnitelya([source], str(self.folder), "2026")
                 self.assertEqual(pd.read_excel(result.imya)["отслежено"].tolist(), ["нет", "нет"])
 
-    def test_real_menu_reuses_six_files_until_exit(self):
+    def test_main_reports_missing_automatic_input_files(self):
         project = Path(__file__).resolve().parents[1]
         for path in project.glob("*.py"):
             shutil.copy2(path, self.folder / path.name)
-        bank_rows([100]).to_excel(self.folder / "bank.xlsx", index=False)
-        files = []
-        for i in range(6):
-            filename = f"employee{i}.xlsx"
-            employee_rows([100 + i]).to_excel(self.folder / filename, index=False)
-            files.append(filename)
-        answers = ["2026", "сентябрь", "3", "1", "1", "bank.xlsx"]
-        answers += files + ["3", "3", "1", "-1"]
+        answers = ["2026", "сентябрь", "-1"]
         process = subprocess.run(
             [sys.executable, "-B", str(self.folder / "buhuchet.py")],
             input="\n".join(answers) + "\n", text=True, capture_output=True,
             cwd=self.folder, timeout=30,
         )
         self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
-        self.assertNotIn("Ошибка", process.stdout)
-        self.assertIn("3 - подгруженные новые таблицы этой сессии", process.stdout)
-        self.assertEqual(process.stdout.count("Введите название файла с операциями"), 6)
-        saved = pd.read_excel(self.folder / "2026/сентябрь/bank_с_исполнителями.xlsx")
-        self.assertEqual(saved.loc[0, "Исполнитель"], "Алексей")
+        self.assertIn("Не найдены", process.stdout)
+        self.assertIn("АлексейБТ", process.stdout)
+
+    def test_operation_number_is_text_identifier(self):
+        self.assertEqual(normalizovat_nomer("0012"), "0012")
+        self.assertEqual(normalizovat_nomer("A-12"), "a-12")
+        self.assertEqual(normalizovat_nomer(12.0), "12")
+
+    def test_main_automatically_processes_named_files(self):
+        project = Path(__file__).resolve().parents[1]
+        for path in project.glob("*.py"):
+            shutil.copy2(path, self.folder / path.name)
+
+        header = [
+            "Документ", "Дата операции", "Корреспондент", "Оборот Дт",
+            "Оборот Кт", "Назначение платежа",
+        ]
+        bank = pd.DataFrame([
+            header, [None] * len(header),
+            [1, "15.09.2026", "Тест", None, 100, "Оплата по договору"],
+        ])
+        companies = [
+            "Альтэгра", "АВК", "Билд", "Вектор", "Макрон", "Позитрон",
+            "Сити", "Кит", "Энергопоинт", "Факторион",
+        ]
+        for company in companies:
+            bank.to_excel(self.folder / f"{company}.xlsx", header=False, index=False)
+
+        for filename in [
+            "АлексейБТ", "АлексейК", "ВладимирБТ", "ВладимирК",
+            "ДмитрийБТ", "ДмитрийК",
+        ]:
+            employee_rows([100], dates=["15.09.2026"]).to_excel(
+                self.folder / f"{filename}.xlsx", index=False
+            )
+
+        first_process = subprocess.run(
+            [sys.executable, "-B", str(self.folder / "buhuchet.py")],
+            input="2026\nсентябрь\n3\n-1\n",
+            text=True, capture_output=True, cwd=self.folder, timeout=60,
+        )
+        self.assertEqual(
+            first_process.returncode, 0,
+            first_process.stdout + first_process.stderr,
+        )
+        month = self.folder / "2026" / "сентябрь"
+        self.assertTrue((month / "Кит_готовая.xlsx").is_file())
+        ready_path = month / "Кит_готовая.xlsx"
+        checked = pd.read_excel(ready_path)
+        checked.loc[0, "Исполнитель"] = "Владимир"
+        checked.to_excel(ready_path, index=False)
+
+        second_process = subprocess.run(
+            [sys.executable, "-B", str(self.folder / "buhuchet.py")],
+            input="2026\nсентябрь\n4\n5\n6\n7\n-1\n",
+            text=True, capture_output=True, cwd=self.folder, timeout=60,
+        )
+        self.assertEqual(
+            second_process.returncode, 0,
+            second_process.stdout + second_process.stderr,
+        )
+        self.assertTrue((month / "Премии сотрудников сентябрь.xlsx").is_file())
+        self.assertTrue((month / "Все операции.xlsx").is_file())
+        self.assertTrue((self.folder / "2026" / "Итоговая таблица 2026.xlsx").is_file())
+        saved = pd.read_excel(ready_path)
+        self.assertEqual(saved.loc[0, "Исполнитель"], "Владимир")
 
     def test_classification_and_separate_fines_in_summary(self):
         source = pd.DataFrame({

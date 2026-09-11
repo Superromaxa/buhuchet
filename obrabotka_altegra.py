@@ -137,7 +137,9 @@ def prochitat_vypisku(fil, list_excel=0):
     return df
 
 
-def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
+def dobavit_tip_operacii(
+    tablica=None, papka_rezultatov=".", podtverzhdat_summy=True
+):
     novaya_tablica = None
 
     if tablica is None:
@@ -176,7 +178,7 @@ def dobavit_tip_operacii(tablica=None, papka_rezultatov="."):
     df["Оборот Дт"] = pd.to_numeric(df["Оборот Дт"], errors="coerce")
     df["Оборот Кт"] = pd.to_numeric(df["Оборот Кт"], errors="coerce")
 
-    if not podtverdit_itogovye_summy(df):
+    if podtverzhdat_summy and not podtverdit_itogovye_summy(df):
         return None, None, None
 
     if tablica is None:

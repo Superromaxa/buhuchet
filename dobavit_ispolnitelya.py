@@ -14,6 +14,19 @@ def normalizovat_tekst(tekst):
     return " ".join(str(tekst).strip().lower().replace("ё", "е").split())
 
 
+def normalizovat_nomer(nomer):
+    """Сравнивает номера как текст, сохраняя буквы и ведущие нули."""
+    if pd.isna(nomer):
+        return ""
+    tekst = str(nomer).strip()
+    if not tekst:
+        return ""
+    # Excel иногда читает числовой номер как 12.0. Это тот же номер, что 12.
+    if re.fullmatch(r"[+-]?\d+\.0+", tekst):
+        tekst = tekst.split(".", 1)[0]
+    return normalizovat_tekst(tekst)
+
+
 def vybrat_format_tablic_ispolniteley(est_podgruzhennye=False):
     print("\nКакие таблицы исполнителей использовать?")
     print("1 - новые таблицы (загрузить файлы)")
@@ -134,7 +147,7 @@ def prochitat_podgotovlennye_operacii(fil, chelovek, konkurs):
     excel = pd.ExcelFile(fil)
 
     for list_excel in excel.sheet_names:
-        df = pd.read_excel(fil, sheet_name=list_excel)
+        df = pd.read_excel(fil, sheet_name=list_excel, dtype={"Номер": str})
         kolonki = {
             normalizovat_tekst(kolonka): kolonka for kolonka in df.columns
         }
@@ -160,6 +173,9 @@ def prochitat_podgotovlennye_operacii(fil, chelovek, konkurs):
             rezultat["Сумма оплаты"] = pd.to_numeric(
                 rezultat["Сумма оплаты"], errors="coerce"
             )
+            # Номер — идентификатор операции, а не число для расчёта.
+            # Он может быть буквенным, смешанным или иметь ведущие нули.
+            rezultat["Номер"] = rezultat["Номер"].astype("string")
             rezultat["страховка"] = pd.to_numeric(
                 rezultat["страховка"], errors="coerce"
             )
@@ -343,6 +359,7 @@ def dobavit_ispolnitelya(
     mesyac=None,
     gotovye_operacii=None,
     kesh_novyh_tablic=None,
+    imya_rezultata=None,
 ):
     novye_tablicy = []
 
@@ -457,7 +474,7 @@ def dobavit_ispolnitelya(
         if "Номер" not in spravochnik.columns:
             spravochnik["Номер"] = None
         spravochnik["Номер для сравнения"] = spravochnik["Номер"].apply(
-            normalizovat_tekst
+            normalizovat_nomer
         )
         spravochnik["Группа для сравнения"] = spravochnik[
             "Номер для сравнения"
@@ -540,7 +557,7 @@ def dobavit_ispolnitelya(
 
     imya_fayla = os.path.basename(fil)
     imya_bez_rasshireniya = os.path.splitext(imya_fayla)[0]
-    fail_rezultat = os.path.join(
+    fail_rezultat = imya_rezultata or os.path.join(
         papka_rezultatov,
         imya_bez_rasshireniya + "_с_исполнителями.xlsx",
     )
